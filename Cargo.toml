@@ -1,0 +1,36 @@
+[package]
+name = "contract-csv-tool"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# HTTP client for Etherscan API
+reqwest = { version = "0.11", features = ["json"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# CSV reading/writing
+csv = "1.3"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Command line parsing
+clap = { version = "4.5", features = ["derive"] }
+
+# Environment variables
+dotenvy = "0.15"
+
+# Database (PostgreSQL)
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres"] }
+
+# Error handling
+anyhow = "1.0"
+
+# Progress bars
+indicatif = "0.17"
+
+# Date/time handling
+chrono = "0.4"
