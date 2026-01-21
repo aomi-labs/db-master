@@ -18,7 +18,6 @@ Cargo.lock
 Thumbs.db
 
 # Data files (don't commit large CSVs and address lists)
-*.csv
 *.txt
 !README.md
 !REMOTE_IMPORT_INSTRUCTIONS.md
