@@ -1,0 +1,52 @@
+name: Database Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'migrations/**'
+      - 'contracts.csv'
+      - 'scripts/**'
+  workflow_dispatch:
+
+env:
+  # Use public endpoint for GitHub Actions (outside VPC)
+  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+jobs:
+  migrate-and-seed:
+    name: Run Migrations & Seed
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+      
+      - name: Verify database connection
+        run: |
+          echo "Testing connection to database..."
+          psql "$DATABASE_URL" -c "SELECT version();" | head -3
+      
+      - name: Run migrations
+        run: |
+          chmod +x scripts/migrate.sh
+          ./scripts/migrate.sh
+      
+      - name: Seed contracts
+        run: |
+          chmod +x scripts/seed.sh
+          ./scripts/seed.sh
+      
+      - name: Verify tables
+        run: |
+          echo "📊 Table row counts:"
+          psql "$DATABASE_URL" -c "
+            SELECT relname AS table_name, n_live_tup AS rows 
+            FROM pg_stat_user_tables 
+            ORDER BY n_live_tup DESC;
+          "
