@@ -6,6 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$SCRIPT_DIR/.."
+cd "$ROOT_DIR"
 
 if [ -z "${DATABASE_URL:-}" ]; then
     echo "❌ ERROR: DATABASE_URL is required"
@@ -16,8 +17,7 @@ echo "🌱 Seeding database..."
 echo "   Target: ${DATABASE_URL%%@*}@****"
 
 # Check if contracts.csv exists
-CONTRACTS_CSV="$ROOT_DIR/contracts.csv"
-if [ ! -f "$CONTRACTS_CSV" ]; then
+if [ ! -f "contracts.csv" ]; then
     echo "⚠️  No contracts.csv found, skipping contract import"
     exit 0
 fi
@@ -26,32 +26,66 @@ fi
 EXISTING=$(psql "$DATABASE_URL" -t -c "SELECT COUNT(*) FROM contracts;" 2>/dev/null | tr -d ' ')
 echo "   📊 Existing contracts: $EXISTING"
 
-# Import contracts from CSV using COPY (fast bulk import)
-# CSV format: address,chain,chain_id,source_code,abi,name,symbol,description,is_proxy,implementation_address,last_activity_at,created_at,updated_at,protocol,contract_type,version
 echo "   📥 Importing from contracts.csv..."
 
-# Create temp table, load CSV, then upsert
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<EOF
--- Create temp table for import
-CREATE TEMP TABLE contracts_import (LIKE contracts INCLUDING ALL);
+# All in one psql session using heredoc with \copy
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'EOSQL'
+-- Create staging table (regular table, not temp, so \copy works)
+DROP TABLE IF EXISTS _contracts_staging;
+CREATE TABLE _contracts_staging (
+    address TEXT,
+    chain TEXT,
+    chain_id INTEGER,
+    name TEXT,
+    symbol TEXT,
+    source_code TEXT,
+    abi TEXT,
+    is_proxy TEXT,
+    implementation_address TEXT,
+    protocol TEXT,
+    contract_type TEXT,
+    version TEXT
+);
+EOSQL
 
--- Import CSV (skip header)
-\COPY contracts_import(address, chain, chain_id, source_code, abi) FROM '$CONTRACTS_CSV' WITH (FORMAT csv, HEADER true);
+# Import CSV using \copy (must be separate command)
+psql "$DATABASE_URL" -c "\COPY _contracts_staging(address,chain,chain_id,name,symbol,source_code,abi,is_proxy,implementation_address,protocol,contract_type,version) FROM 'contracts.csv' WITH (FORMAT csv, HEADER true);"
 
+# Upsert and cleanup
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'EOSQL'
 -- Upsert into main table (idempotent)
-INSERT INTO contracts (address, chain, chain_id, source_code, abi)
-SELECT address, chain, chain_id, source_code, abi
-FROM contracts_import
+INSERT INTO contracts (
+    address, chain, chain_id, name, symbol, source_code, abi, 
+    is_proxy, implementation_address, protocol, contract_type, version
+)
+SELECT 
+    address, chain, chain_id, 
+    COALESCE(name, 'Unknown'),
+    symbol,
+    COALESCE(source_code, ''),
+    COALESCE(abi, '[]'),
+    COALESCE(is_proxy, 'false')::BOOLEAN,
+    implementation_address,
+    protocol,
+    contract_type,
+    version
+FROM _contracts_staging
+WHERE address IS NOT NULL AND chain_id IS NOT NULL
 ON CONFLICT (chain_id, address) DO UPDATE SET
-    source_code = EXCLUDED.source_code,
-    abi = EXCLUDED.abi,
+    name = COALESCE(EXCLUDED.name, contracts.name),
+    symbol = COALESCE(EXCLUDED.symbol, contracts.symbol),
+    source_code = COALESCE(EXCLUDED.source_code, contracts.source_code),
+    abi = COALESCE(EXCLUDED.abi, contracts.abi),
+    is_proxy = COALESCE(EXCLUDED.is_proxy, contracts.is_proxy),
+    implementation_address = COALESCE(EXCLUDED.implementation_address, contracts.implementation_address),
+    protocol = COALESCE(EXCLUDED.protocol, contracts.protocol),
+    contract_type = COALESCE(EXCLUDED.contract_type, contracts.contract_type),
+    version = COALESCE(EXCLUDED.version, contracts.version),
     updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT;
 
--- Report results
-SELECT 'Imported/Updated ' || COUNT(*) || ' contracts' FROM contracts_import;
-
-DROP TABLE contracts_import;
-EOF
+-- Cleanup staging table
+DROP TABLE _contracts_staging;
+EOSQL
 
 # Count after import
 AFTER=$(psql "$DATABASE_URL" -t -c "SELECT COUNT(*) FROM contracts;" 2>/dev/null | tr -d ' ')
