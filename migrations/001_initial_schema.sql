@@ -94,8 +94,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     started_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT,
     last_active_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT,
     title TEXT,
-    pending_transaction JSONB,
-    messages_persisted BOOLEAN NOT NULL DEFAULT FALSE
+    pending_transaction JSONB
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_public_key ON sessions(public_key);
